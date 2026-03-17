@@ -1,0 +1,94 @@
+name: Code Quality Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+      - develop
+      - feature/**
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  quality-checks:
+    name: Run Code Quality & Security Tools
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      ###############################################################
+      # Node/JavaScript Code Quality (ESLint)
+      ###############################################################
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Node dependencies
+        run: |
+          if [ -f package.json ]; then
+            npm install
+          else
+            echo "No JS project found. Skipping npm install."
+          fi
+
+      - name: Run ESLint
+        if: ${{ hashFiles('package.json') != '' }}
+        run: |
+          npx eslint . || true
+        continue-on-error: true
+
+      ###############################################################
+      # Python Code Quality (Ruff + Pylint + Bandit)
+      ###############################################################
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python Dependencies
+        run: |
+          pip install ruff pylint bandit semgrep detect-secrets
+
+      - name: Ruff Lint (Fast Python Lint)
+        run: ruff check . || true
+
+      - name: Run Pylint
+        run: |
+          pylint $(git ls-files '*.py') || true
+
+      - name: Run Bandit (Security Scan)
+        run: |
+          bandit -r . -lll || true
+
+      ###############################################################
+      # Semgrep – Security + Code Scanning
+      ###############################################################
+      - name: Run Semgrep (Security Rules)
+        run: |
+          semgrep ci --config p/owasp-top-ten || true
+
+      ###############################################################
+      # Detect Secrets (Optional)
+      ###############################################################
+      - name: Detect Secrets
+        run: |
+          detect-secrets scan > .secrets.baseline || true
+
+      ###############################################################
+      # Upload annotated results to PR
+      ###############################################################
+      - name: Upload Problem Matchers
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-quality-reports
+          path: |
+            ./**/*.txt
+            ./**/*.log
+            .secrets.baseline
+        if-no-files-found: ignore
